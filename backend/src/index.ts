@@ -34,7 +34,10 @@ const httpServer = http.createServer(app)
 // Accept localhost AND any private-network IP (for mobile access on LAN)
 const isAllowedOrigin = (origin: string | undefined): boolean => {
     if (!origin) return true                                          // curl / Postman
-    if (origin === CLIENT_URL) return true                            // Deployed frontend
+    if (origin === CLIENT_URL) return true                            // Deployed frontend (web.app)
+    // Firebase Hosting always provides both *.web.app AND *.firebaseapp.com — allow both
+    if (/^https:\/\/[\w-]+\.web\.app$/.test(origin)) return true
+    if (/^https:\/\/[\w-]+\.firebaseapp\.com$/.test(origin)) return true
     if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return true    // localhost:*
     if (/^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) return true // loopback
     // Private subnets: 192.168.x.x, 10.x.x.x, 172.16-31.x.x
