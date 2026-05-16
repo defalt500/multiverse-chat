@@ -192,6 +192,9 @@ async function handleAiReply(
 
         console.log("AI request:", userMessage, aiUid);
 
+        // Signal that the AI is "typing" while generating
+        io.to(conversationId).emit('typing', { conversationId, userId: aiUid })
+
         // Generate the reply using Gemini
         let replyContent = '';
         try {
@@ -207,6 +210,9 @@ async function handleAiReply(
             // Fallback response explicitly requested by user
             replyContent = "Lo siento, no pude generar una respuesta en este momento.";
         }
+
+        // Stop the typing indicator
+        io.to(conversationId).emit('stop_typing', { conversationId, userId: aiUid })
 
         if (!replyContent) return
 
