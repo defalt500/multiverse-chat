@@ -1,3 +1,162 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+    * {
+        box-sizing: border-box;
+    }
+
+    html {
+        font-family: 'Inter', system-ui, sans-serif;
+        scroll-behavior: smooth;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+        @apply bg-gray-100 dark:bg-dark-panel;
+        margin: 0;
+        padding: 0;
+        overscroll-behavior: none;
+    }
+
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+        width: 3px;
+        height: 3px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        @apply bg-gray-300 dark:bg-gray-600 rounded-full;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        @apply bg-gray-400 dark:bg-gray-500;
+    }
+}
+
+@layer utilities {
+    .scrollbar-none {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+    }
+    .scrollbar-none::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* Safe area padding for iOS notch phones */
+    .pb-safe {
+        padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+    }
+
+    .typing-dot {
+        @apply w-2 h-2 rounded-full bg-gray-400 animate-bounce;
+    }
+
+    .animate-fade-slide {
+        animation: fadeSlideIn 0.22s ease-out both;
+    }
+
+    .animate-slide-up {
+        animation: slideUpIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    .animate-scale-in {
+        animation: scaleIn 0.18s ease-out both;
+    }
+}
+
+/* ── Bottom navigation bar ─────────────────────────────────────── */
+@layer components {
+    .bottom-nav-bar {
+        @apply bg-white/95 dark:bg-dark-sidebar/95 backdrop-blur-md;
+        border-top: 1px solid theme('colors.gray.100');
+        box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.08);
+    }
+
+    .dark .bottom-nav-bar {
+        border-top-color: theme('colors.gray.800');
+        box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.3);
+    }
+
+    .bottom-nav-item {
+        @apply flex flex-col items-center justify-center gap-0.5 px-2.5 py-1.5 rounded-2xl transition-all duration-200 relative min-w-[48px];
+    }
+
+    .bottom-nav-item-active {
+        @apply text-primary;
+    }
+
+    .bottom-nav-item-inactive {
+        @apply text-gray-400 dark:text-gray-500;
+    }
+
+    .bottom-nav-item-inactive:hover {
+        @apply text-gray-600 dark:text-gray-300;
+    }
+
+    .bottom-nav-icon-wrap {
+        @apply flex items-center justify-center w-7 h-7 rounded-xl transition-all duration-200;
+    }
+
+    .bottom-nav-icon-active {
+        @apply bg-primary/15 text-primary;
+    }
+
+    .bottom-nav-label {
+        @apply text-[10px] font-medium leading-none tracking-tight;
+    }
+
+    .bottom-nav-pip {
+        @apply absolute top-0.5 w-1 h-1 bg-primary rounded-full;
+    }
+}
+
+/* ── Keyframes ─────────────────────────────────────────────────── */
+@keyframes fadeSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes slideUpIn {
+    from {
+        opacity: 0;
+        transform: translateY(100%);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes scaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* ── Mobile: prevent ChatWindow from hiding under bottom nav ─── */
+@media (max-width: 767px) {
+    /* Message input sits above the mobile bottom nav */
+    .chat-input-wrapper {
+        padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+        margin-bottom: 64px;
+    }
+}
