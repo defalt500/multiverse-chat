@@ -121,6 +121,11 @@ async function handleAiReply(
         const aiUid = `ai-${characterId}`
         console.log('[AI] Request →', characterId, ':', userMessage.slice(0, 60))
 
+        // Signal "AI is thinking" to all users in this conversation room
+        try {
+            getIO().to(conversationId).emit('typing', { conversationId, userId: aiUid })
+        } catch { /* non-fatal */ }
+
         let replyContent = ''
         try {
             replyContent = await generateReplyForConversation(
@@ -134,6 +139,11 @@ async function handleAiReply(
             console.error('[AI] Gemini generation error:', genError)
             replyContent = 'Lo siento, no pude generar una respuesta en este momento.'
         }
+
+        // Stop typing indicator regardless of success/fail
+        try {
+            getIO().to(conversationId).emit('stop_typing', { conversationId, userId: aiUid })
+        } catch { /* non-fatal */ }
 
         if (!replyContent) {
             console.warn('[AI] Empty response, skipping save/emit')
