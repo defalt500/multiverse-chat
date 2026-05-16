@@ -36,7 +36,8 @@ export async function generateAIReply(
         contents,
         config: {
             systemInstruction: systemPrompt,
-            maxOutputTokens: 1024,
+            maxOutputTokens: 8192,
+            temperature: 0.85,
         }
     })
 
