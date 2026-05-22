@@ -15,11 +15,13 @@ import { contactsRouter } from './routes/contacts'
 import { conversationsRouter } from './routes/conversations'
 import { messagesRouter } from './routes/messages'
 import { aiRouter } from './routes/ai'
+import { backupRouter } from './routes/backup'
 import { errorHandler } from './middlewares/errorHandler'
 import { generalLimiter } from './middlewares/rateLimiter'
 import { registerSocketHandlers } from './sockets/chatSocket'
 import { seedDefaultCharacters } from './services/aiCharacterService'
 import { seedDefaultUsers } from './services/seederService'
+import { startBackupScheduler } from './services/backupScheduler'
 
 const PORT = process.env.PORT || 5000
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173'
@@ -100,6 +102,7 @@ app.use('/api/contacts', contactsRouter)
 app.use('/api/conversations', conversationsRouter)
 app.use('/api/messages', messagesRouter)
 app.use('/api/ai', aiRouter)
+app.use('/api/backups', backupRouter)
 
 // ─── 404 Handler ─────────────────────────────────────────────────────────────
 
@@ -139,6 +142,9 @@ httpServer.listen(PORT, async () => {
     // Seed AI characters and default users (admin1, test1, test2)
     await seedDefaultCharacters()
     await seedDefaultUsers()
+
+    // Start automatic backup scheduler (every 6 hours)
+    startBackupScheduler()
 })
 
 export { io }

@@ -3,6 +3,7 @@
 import { db } from '../config/firebase'
 import { DbUser, ApiUser } from '../types'
 import admin from 'firebase-admin'
+import { createCollectionBackup } from './backupService'
 
 const USERS = 'users'
 
@@ -147,6 +148,12 @@ export async function getAllUsers(page: number = 1, limitCount: number = 10): Pr
 
 /** Delete a user and their conversations (admin only) */
 export async function deleteUserById(uid: string): Promise<void> {
+    // ♥ Event-driven backup: snapshot users before permanent deletion.
+    //   Fire-and-forget: backup failure must never block or break the delete.
+    createCollectionBackup('users', `pre-delete-user-${uid}`).catch((err) =>
+        console.warn(`⚠️  [Backup] Pre-delete backup failed for user ${uid}:`, err)
+    )
+
     // Delete Firestore user document
     await db.collection(USERS).doc(uid).delete()
     // Delete conversations where this user is the ONLY participant (AI chats)

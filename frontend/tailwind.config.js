@@ -36,6 +36,10 @@ export default {
         'scale-in': 'scaleIn 0.18s ease-out both',
         'fade-slide': 'fadeSlideIn 0.22s ease-out both',
         'pulse-slow': 'pulse 3s ease-in-out infinite',
+        'page-in': 'pageFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both',
+        'ai-glow': 'aiGlow 2s ease-in-out infinite',
+        'slide-in-right': 'slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1) both',
+        'slide-in-left': 'slideInLeft 0.25s cubic-bezier(0.16, 1, 0.3, 1) both',
       },
       keyframes: {
         slideUpIn: {
@@ -57,5 +61,5 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [require('@tailwindcss/typography')],
 }

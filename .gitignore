@@ -45,3 +45,8 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# Backups (Local storage)
+backend/backups/
+*.json.bak
+

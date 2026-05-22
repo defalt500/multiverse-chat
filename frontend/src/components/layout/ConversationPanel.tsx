@@ -57,13 +57,13 @@ const ConversationPanel = () => {
                 {/* ── Content based on active view ── */}
                 <div className="flex-1 min-h-0 overflow-hidden flex flex-col pb-16 md:pb-0">
                     {activeView === 'contacts' ? (
-                        <ContactsView />
+                        <div key="contacts" className="animate-panel-fade h-full"><ContactsView /></div>
                     ) : activeView === 'add-contact' ? (
-                        <AddContactView />
+                        <div key="add-contact" className="animate-panel-fade h-full"><AddContactView /></div>
                     ) : activeView === 'settings' ? (
-                        <EditProfileView />
+                        <div key="settings" className="animate-panel-fade h-full"><EditProfileView /></div>
                     ) : (
-                        <>
+                        <div key="chats" className="animate-panel-fade h-full flex flex-col">
                             {/* Search */}
                             <div className="px-4 pt-1 pb-3 flex-shrink-0">
                                 <div className="flex items-center gap-2 bg-gray-bg dark:bg-dark-card rounded-2xl px-3 py-2.5 transition-all focus-within:ring-2 focus-within:ring-primary/30">
@@ -88,7 +88,7 @@ const ConversationPanel = () => {
                             </div>
 
                             <ConversationList searchQuery={searchQuery} onSelect={() => { }} />
-                        </>
+                        </div>
                     )}
                 </div>
             </div>

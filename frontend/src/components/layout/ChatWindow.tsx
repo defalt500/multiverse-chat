@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useState, useCallback } from 'react'
 import { useAppStore } from '../../store/useAppStore'
 import Avatar from '../ui/Avatar'
 import MessageBubble from '../chat/MessageBubble'
@@ -9,24 +9,75 @@ import { fetchApi } from '../../api'
 const ChatWindow = () => {
     const {
         conversations, activeConversationId, setActiveConversation,
-        openRightPanel, currentUser, typingState,
+        openRightPanel, currentUser, typingState, isAIGenerating,
     } = useAppStore()
-    const messagesEndRef = useRef<HTMLDivElement>(null)
+
+    // Ref to the scrollable container (not just the sentinel div)
+    const scrollContainerRef = useRef<HTMLDivElement>(null)
     const [searchOpen, setSearchOpen] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
     const searchInputRef = useRef<HTMLInputElement>(null)
 
     const conversation = conversations.find((c) => c.id === activeConversationId)
 
+    // Detect AI conversations
+    const isAIConversation = Boolean(
+        conversation && !conversation.isGroup && (
+            conversation.messages.some(
+                m => m.senderId !== currentUser?.id && m.senderId?.startsWith('ai-')
+            ) ||
+            (activeConversationId && Array.from(typingState[activeConversationId] ?? []).some(
+                id => id.startsWith('ai-')
+            ))
+        )
+    )
+
     // Determine if someone else is typing in this conversation
     const typingUsers = activeConversationId
         ? Array.from(typingState[activeConversationId] ?? []).filter(id => id !== currentUser?.id)
         : []
     const someoneIsTyping = typingUsers.length > 0
+    const aiIsGenerating = activeConversationId
+        ? (isAIGenerating[activeConversationId] === true ||
+            Array.from(typingState[activeConversationId] ?? []).some(id => id.startsWith('ai-')))
+        : false
+    const showTypingIndicator = (someoneIsTyping || aiIsGenerating) && !searchQuery
 
+    // ── Reliable scroll-to-bottom helper ─────────────────────────────────────
+    // Uses the container's scrollHeight directly — works even when scrollIntoView
+    // might be blocked by the browser while content is still painting.
+    const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+        const el = scrollContainerRef.current
+        if (!el) return
+        el.scrollTo({ top: el.scrollHeight, behavior })
+    }, [])
+
+    // Scroll instantly when switching conversations
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }, [conversation?.messages])
+        scrollToBottom('instant')
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeConversationId])
+
+    // Scroll smoothly when messages update
+    useEffect(() => {
+        scrollToBottom('smooth')
+    }, [conversation?.messages, scrollToBottom])
+
+    // Scroll when typing indicator appears (human or AI)
+    // Two nested RAFs guarantee the DOM is fully painted before we measure scrollHeight
+    useEffect(() => {
+        if (!showTypingIndicator) return
+        let raf1: number, raf2: number
+        raf1 = requestAnimationFrame(() => {
+            raf2 = requestAnimationFrame(() => {
+                scrollToBottom('smooth')
+            })
+        })
+        return () => {
+            cancelAnimationFrame(raf1)
+            cancelAnimationFrame(raf2)
+        }
+    }, [showTypingIndicator, scrollToBottom])
 
     // Focus search input when it opens
     useEffect(() => {
@@ -57,13 +108,11 @@ const ChatWindow = () => {
         })
     }
 
-    // Mobile back — clear active conversation to show list
     const handleMobileBack = () => {
         setActiveConversation(null)
         setSearchOpen(false)
     }
 
-    // Filter messages by search query
     const displayedMessages = conversation?.messages ?? []
     const filteredMessages = searchQuery.trim()
         ? displayedMessages.filter(m => m.content.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -103,7 +152,6 @@ const ChatWindow = () => {
                         </svg>
                     </button>
 
-                    {/* Clickable header → opens profile */}
                     <button
                         onClick={handleHeaderClick}
                         className="flex items-center gap-3 min-w-0 hover:opacity-80 transition-opacity text-left"
@@ -114,14 +162,13 @@ const ChatWindow = () => {
                             <h3 className="font-semibold text-gray-800 dark:text-white text-sm leading-tight truncate">
                                 {conversation.name}
                             </h3>
-                            <p className={`text-xs ${conversation.isOnline ? 'text-green-500' : 'text-gray-400'}`}>
+                            <p className={`text-xs ${someoneIsTyping ? 'text-primary font-medium' : conversation.isOnline ? 'text-green-500' : 'text-gray-400'}`}>
                                 {someoneIsTyping ? 'escribiendo...' : conversation.isOnline ? 'En línea' : 'Desconectado'}
                             </p>
                         </div>
                     </button>
                 </div>
 
-                {/* Right actions: search */}
                 <div className="flex items-center gap-1 flex-shrink-0">
                     <button
                         onClick={() => setSearchOpen(v => !v)}
@@ -161,7 +208,6 @@ const ChatWindow = () => {
                 </div>
             </div>
 
-            {/* Search results count */}
             {searchQuery.trim() && (
                 <div className="px-4 py-1 bg-white dark:bg-dark-sidebar border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
                     <p className="text-xs text-gray-400">
@@ -173,8 +219,11 @@ const ChatWindow = () => {
             )}
 
             {/* ── Messages Area ── */}
-            <div className="flex-1 overflow-y-auto px-3 md:px-4 py-4 flex flex-col gap-2.5">
-                {/* Date separator */}
+            <div
+                ref={scrollContainerRef}
+                key={conversation.id}
+                className="flex-1 overflow-y-auto px-3 md:px-4 py-4 flex flex-col gap-2.5 animate-chat-enter"
+            >
                 {!searchQuery.trim() && (
                     <div className="flex items-center gap-3 my-2">
                         <div className="flex-1 h-px bg-gray-200 dark:bg-gray-600" />
@@ -186,11 +235,23 @@ const ChatWindow = () => {
                 )}
 
                 {filteredMessages.map((msg) => (
-                    <MessageBubble key={msg.id} message={msg} highlight={searchQuery.trim() || undefined} />
+                    <MessageBubble
+                        key={msg.id}
+                        message={msg}
+                        highlight={searchQuery.trim() || undefined}
+                        isAI={isAIConversation && msg.senderId !== currentUser?.id}
+                    />
                 ))}
 
-                {someoneIsTyping && !searchQuery && <TypingIndicator name={conversation.name} avatar={conversation.avatar} />}
-                <div ref={messagesEndRef} />
+                {showTypingIndicator && (
+                    <TypingIndicator
+                        name={conversation.name}
+                        avatar={conversation.avatar}
+                        isAI={isAIConversation || aiIsGenerating}
+                    />
+                )}
+                {/* Bottom sentinel — still useful for "scroll to bottom" button future feature */}
+                <div className="h-1 flex-shrink-0" />
             </div>
 
             {/* ── Input ── */}

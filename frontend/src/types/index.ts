@@ -30,6 +30,7 @@ export interface Conversation {
     avatar: string
     lastMessage: string
     lastMessageTime: string
+    lastAt?: number          // epoch ms — used for sorting by recency
     unreadCount: number
     isOnline: boolean
     isTyping: boolean

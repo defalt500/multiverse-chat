@@ -4,6 +4,7 @@ import ConversationPanel from '../components/layout/ConversationPanel'
 import ChatWindow from '../components/layout/ChatWindow'
 import BottomNav from '../components/layout/BottomNav'
 import UserProfileDrawer from '../components/profile/UserProfileDrawer'
+import ToastNotifications from '../components/ui/ToastNotifications'
 import { initSocket, joinConversation, getSocket } from '../socket'
 import { useAppStore } from '../store/useAppStore'
 import { getFirebaseAuth } from '../config/firebase'
@@ -63,28 +64,28 @@ const ChatPage = () => {
     const mobileShowChat = !!activeConversationId
 
     return (
-        <div className="h-screen flex overflow-hidden bg-gray-bg dark:bg-dark-panel">
+        <div className="app-height flex overflow-hidden bg-gray-bg dark:bg-dark-panel animate-page-in">
             {/* ── Desktop: Icon sidebar always visible ── */}
-            <div className="hidden md:flex">
+            <div className="hidden md:flex flex-shrink-0">
                 <IconSidebar />
             </div>
 
-            {/* ── Desktop: ConversationPanel always shown ── */}
-            {/* ── Mobile: ConversationPanel shown only when no chat is active ── */}
+            {/* ── Mobile: ConversationPanel — full width, full height, no overflow ── */}
             <div className={`
-                md:flex flex-col flex-shrink-0
-                ${mobileShowChat ? 'hidden' : 'flex w-full'}
-                md:w-auto
+                md:flex flex-shrink-0
+                ${mobileShowChat
+                    ? 'hidden'
+                    : 'flex flex-col w-full min-h-0 flex-1 animate-slide-in-left'}
+                md:flex-col md:w-auto md:flex-none
             `}>
                 <ConversationPanel />
             </div>
 
-            {/* ── Desktop: ChatWindow always shown ── */}
-            {/* ── Mobile: ChatWindow shown only when a chat is selected ── */}
+            {/* ── Mobile: ChatWindow — full width, full height, no overflow ── */}
             <div className={`
-                md:flex flex-1 flex-col min-w-0
-                ${mobileShowChat ? 'flex' : 'hidden'}
-                md:flex
+                md:flex flex-1 min-w-0 min-h-0
+                ${mobileShowChat ? 'flex flex-col animate-slide-in-right' : 'hidden'}
+                md:flex-col
             `}>
                 <ChatWindow />
             </div>
@@ -94,6 +95,9 @@ const ChatPage = () => {
 
             {/* ── Mobile: Fixed bottom navigation ── */}
             <BottomNav />
+
+            {/* ── Toast notifications (fixed overlay) ── */}
+            <ToastNotifications />
         </div>
     )
 }

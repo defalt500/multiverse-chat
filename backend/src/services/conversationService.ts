@@ -4,6 +4,7 @@ import { db } from '../config/firebase'
 import { DbConversation, DbUser, ApiConversation } from '../types'
 import { getMessages } from './messageService'
 import admin from 'firebase-admin'
+import { createCollectionBackup } from './backupService'
 
 const CONVS = 'conversations'
 
@@ -192,6 +193,12 @@ export async function deleteConversation(convId: string, uid: string): Promise<v
     const conv = await getConversationById(convId)
     if (!conv) throw new Error('Conversation not found')
     if (!conv.participants.includes(uid)) throw new Error('Unauthorized')
+
+    // ♥ Event-driven backup: snapshot conversations+messages before permanent deletion.
+    //   Fire-and-forget: failure must never block or break the delete.
+    createCollectionBackup('conversations', `pre-delete-conv-${convId}`).catch((err) =>
+        console.warn(`⚠️  [Backup] Pre-delete backup failed for conversation ${convId}:`, err)
+    )
 
     // Delete all messages in subcollection
     const msgSnap = await db.collection(CONVS).doc(convId).collection('messages').get()

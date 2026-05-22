@@ -18,6 +18,8 @@ interface AppState {
     contactRequests: ContactRequest[]
     /** conversationId → Set of userIds currently typing */
     typingState: Record<string, Set<string>>
+    /** conversationId → true while AI is generating a reply */
+    isAIGenerating: Record<string, boolean>
 
     setActiveConversation: (id: string | null) => void
     setActiveView: (view: ActiveView) => void
@@ -43,6 +45,7 @@ interface AppState {
     markNotificationsRead: () => void
     clearNotifications: () => void
     setTyping: (conversationId: string, userId: string, isTyping: boolean) => void
+    setAIGenerating: (conversationId: string, generating: boolean) => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -59,6 +62,7 @@ export const useAppStore = create<AppState>()(
             notifications: [],
             contactRequests: [],
             typingState: {},
+            isAIGenerating: {},
 
             setActiveConversation: (id) => {
                 set({ activeConversationId: id })
@@ -122,8 +126,18 @@ export const useAppStore = create<AppState>()(
             },
 
             sendMessage: async (conversationId: string, content: string) => {
-                const { currentUser } = get()
+                const { currentUser, conversations } = get()
                 if (!currentUser) return
+
+                // Check if this is an AI conversation before sending
+                const conv = conversations.find(c => c.id === conversationId)
+                const isAIConv = conv && !conv.isGroup && conv.messages.some(
+                    m => m.senderId !== currentUser.id && m.senderId?.startsWith('ai-')
+                )
+                // Immediately show the AI thinking indicator
+                if (isAIConv) {
+                    set((state) => ({ isAIGenerating: { ...state.isAIGenerating, [conversationId]: true } }))
+                }
 
                 // Optimistic update — show message instantly without waiting for server
                 const tempId = `temp-${Date.now()}-${Math.random()}`
@@ -145,6 +159,7 @@ export const useAppStore = create<AppState>()(
                                 messages: [...(conv.messages || []), optimisticMsg],
                                 lastMessage: content,
                                 lastMessageTime: optimisticMsg.timestamp,
+                                lastAt: Date.now(),
                             }
                             : conv
                     )
@@ -189,6 +204,7 @@ export const useAppStore = create<AppState>()(
                             updated.messages = [...withoutTemp, message]
                             updated.lastMessage = message.content
                             updated.lastMessageTime = message.timestamp
+                            updated.lastAt = Date.now()
                         }
                         convs[idx] = updated
                     }
@@ -208,7 +224,12 @@ export const useAppStore = create<AppState>()(
                             fromUser: conv ? { id: message.senderId, name: message.senderName, email: '', avatar: '', status: 'online' } : undefined,
                         })
                     }
-                    return { conversations: convs, notifications: newNotifs }
+                    // Clear AI generating indicator when AI message arrives
+                    const newAIGenerating = { ...state.isAIGenerating }
+                    if (message.senderId?.startsWith('ai-')) {
+                        newAIGenerating[message.conversationId] = false
+                    }
+                    return { conversations: convs, notifications: newNotifs, isAIGenerating: newAIGenerating }
                 })
             },
 
@@ -308,6 +329,10 @@ export const useAppStore = create<AppState>()(
                     }
                     return { typingState: { ...state.typingState, [conversationId]: next } }
                 })
+            },
+
+            setAIGenerating: (conversationId: string, generating: boolean) => {
+                set((state) => ({ isAIGenerating: { ...state.isAIGenerating, [conversationId]: generating } }))
             },
         }),
         {

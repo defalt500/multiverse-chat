@@ -59,7 +59,7 @@ const IconSidebar = () => {
     return (
         <div className="w-[60px] flex-shrink-0 bg-white dark:bg-dark-sidebar flex flex-col items-center py-4 gap-2 border-r border-gray-100 dark:border-gray-800">
             {/* Logo */}
-            <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center mb-4 flex-shrink-0">
+            <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center mb-4 flex-shrink-0 shadow-lg shadow-primary/30">
                 <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 9h-2V5h2v6zm0 4h-2v-2h2v2z" />
                 </svg>
@@ -72,9 +72,9 @@ const IconSidebar = () => {
                         key={view}
                         title={label}
                         onClick={() => handleNavClick(view)}
-                        className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${activeView === view
-                            ? 'bg-primary text-white'
-                            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-card'
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 ${activeView === view
+                                ? 'bg-primary text-white scale-110 shadow-md shadow-primary/30 ring-2 ring-primary/20'
+                                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-card hover:scale-105'
                             }`}
                     >
                         {icon}
@@ -117,7 +117,7 @@ const IconSidebar = () => {
                 <button
                     onClick={handleAvatarClick}
                     title="My Profile"
-                    className="rounded-full hover:ring-2 hover:ring-primary transition-all"
+                    className="rounded-full hover:ring-2 hover:ring-primary/70 ring-offset-2 ring-offset-white dark:ring-offset-dark-sidebar transition-all duration-200"
                 >
                     <Avatar src={currentUser.avatar} name={currentUser.name} size="sm" isOnline />
                 </button>

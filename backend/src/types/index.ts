@@ -127,3 +127,22 @@ export interface AuthRequest extends Request {
         email: string
     }
 }
+
+// ─── Backup System ────────────────────────────────────────────────────────────
+
+/** Metadata stored per backup snapshot (no collections payload) */
+export interface BackupMetadata {
+    id: string
+    type: 'full' | 'users' | 'conversations' | 'contactRequests' | 'aiCharacters'
+    triggeredBy: string
+    timestamp: string
+    filePath: string
+    stats: Record<string, number>
+}
+
+/** Full backup snapshot including the serialized Firestore collections */
+export interface BackupSnapshot extends BackupMetadata {
+    /** Serialized documents keyed by collection name.
+     *  messages is a nested Record<conversationId, message[]>. */
+    collections: Record<string, any[] | Record<string, any[]>>
+}
