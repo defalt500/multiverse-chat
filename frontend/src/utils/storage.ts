@@ -16,28 +16,44 @@ export async function uploadFile(
     const storage = getFirebaseStorage()
     const storageRef = ref(storage, path)
 
-    const uploadTask = uploadBytesResumable(storageRef, file)
+    console.log(`Starting upload to: ${path}`)
 
     return new Promise((resolve, reject) => {
-        uploadTask.on(
-            'state_changed',
-            (snapshot) => {
-                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100
-                if (onProgress) onProgress(progress)
-            },
-            (error) => {
-                console.error('Storage upload error:', error)
-                reject(new Error('Falló la subida del archivo. Por favor verifica los permisos de Firebase Storage.'))
-            },
-            async () => {
-                try {
-                    const downloadURL = await getDownloadURL(uploadTask.snapshot.ref)
-                    resolve(downloadURL)
-                } catch (err) {
-                    reject(new Error('Falló al obtener la URL de descarga.'))
+        // Set a 60 second timeout for the entire upload process
+        const timeout = setTimeout(() => {
+            reject(new Error('Tiempo de espera agotado al subir la imagen. Por favor intenta de nuevo.'))
+        }, 60000)
+
+        try {
+            const uploadTask = uploadBytesResumable(storageRef, file)
+
+            uploadTask.on(
+                'state_changed',
+                (snapshot) => {
+                    const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100
+                    if (onProgress) onProgress(progress)
+                },
+                (error) => {
+                    clearTimeout(timeout)
+                    console.error('Storage upload error:', error)
+                    reject(new Error(`Error de Firebase Storage: ${error.message}`))
+                },
+                async () => {
+                    try {
+                        const downloadURL = await getDownloadURL(uploadTask.snapshot.ref)
+                        clearTimeout(timeout)
+                        resolve(downloadURL)
+                    } catch (err) {
+                        clearTimeout(timeout)
+                        reject(new Error('Falló al obtener la URL de descarga.'))
+                    }
                 }
-            }
-        )
+            )
+        } catch (err: any) {
+            clearTimeout(timeout)
+            console.error('Synchronous upload error:', err)
+            reject(new Error(`No se pudo iniciar la subida: ${err.message}`))
+        }
     })
 }
 

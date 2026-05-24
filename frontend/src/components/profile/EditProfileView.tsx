@@ -31,15 +31,26 @@ const EditProfileView = () => {
 
         setError('')
         setSelectedFile(file)
-        const reader = new FileReader()
-        reader.onload = (ev) => setPreviewUrl(ev.target?.result as string)
-        reader.readAsDataURL(file)
+
+        // Clean up previous preview URL if any
+        if (previewUrl && previewUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(previewUrl)
+        }
+
+        // Use ObjectURL instead of base64 for better performance/memory
+        setPreviewUrl(URL.createObjectURL(file))
     }
 
     const handleSave = async () => {
+        if (saving) return
+
         setSaving(true)
         setError('')
         setUploadProgress(0)
+
+        // Track if we need to clean up the preview URL
+        const currentPreviewUrl = previewUrl
+
         try {
             let profilePhotoUrl: string | undefined
 
@@ -47,9 +58,14 @@ const EditProfileView = () => {
                 // Upload to Firebase Storage
                 const ext = selectedFile.name.split('.').pop() || 'png'
                 const path = `avatars/${currentUser.id}_${Date.now()}.${ext}`
-                profilePhotoUrl = await uploadFile(selectedFile, path, (progress) => {
-                    setUploadProgress(Math.round(progress))
-                })
+
+                try {
+                    profilePhotoUrl = await uploadFile(selectedFile, path, (progress) => {
+                        setUploadProgress(Math.round(progress))
+                    })
+                } catch (uploadErr: any) {
+                    throw new Error(uploadErr.message || 'Error al subir la imagen a Firebase.')
+                }
             }
 
             const body: Record<string, string> = { username: nickname, bio }
@@ -60,15 +76,27 @@ const EditProfileView = () => {
                 body: JSON.stringify(body),
             })
 
-            const updated = res?.user || { ...currentUser, username: nickname, bio, avatar: profilePhotoUrl || currentUser.avatar }
-            updateCurrentUser(updated)
+            const updatedUser = res?.user || {
+                ...currentUser,
+                username: nickname,
+                bio,
+                avatar: profilePhotoUrl || currentUser.avatar
+            }
+
+            updateCurrentUser(updatedUser)
             setSelectedFile(null)
+
+            if (currentPreviewUrl && currentPreviewUrl.startsWith('blob:')) {
+                URL.revokeObjectURL(currentPreviewUrl)
+            }
             setPreviewUrl(null)
+
             setUploadProgress(0)
             setSaved(true)
             setTimeout(() => setSaved(false), 2500)
         } catch (err: any) {
-            setError(err.message || 'Error al guardar los cambios')
+            console.error('Save profile error:', err)
+            setError(err.message || 'Error al guardar los cambios. Por favor intenta de nuevo.')
         } finally {
             setSaving(false)
         }
