@@ -1,8 +1,30 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useAppStore } from '../../store/useAppStore'
 import Avatar from '../ui/Avatar'
 import { fetchApi } from '../../api'
-import { uploadFile, validateImageFile } from '../../utils/storage'
+import { validateImageFile } from '../../utils/storage'
+
+/** Resize an image File to max 800×800px and return as base64 JPEG data URL */
+function resizeImageToBase64(file: File, maxSize = 800, quality = 0.8): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const img = new Image()
+        const url = URL.createObjectURL(file)
+        img.onload = () => {
+            URL.revokeObjectURL(url)
+            const scale = Math.min(maxSize / img.width, maxSize / img.height, 1)
+            const w = Math.round(img.width * scale)
+            const h = Math.round(img.height * scale)
+            const canvas = document.createElement('canvas')
+            canvas.width = w
+            canvas.height = h
+            const ctx = canvas.getContext('2d')!
+            ctx.drawImage(img, 0, 0, w, h)
+            resolve(canvas.toDataURL('image/jpeg', quality))
+        }
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Error al procesar la imagen')) }
+        img.src = url
+    })
+}
 
 const EditProfileView = () => {
     const { currentUser, updateCurrentUser } = useAppStore()
@@ -16,6 +38,15 @@ const EditProfileView = () => {
     const [selectedFile, setSelectedFile] = useState<File | null>(null)
     const [uploadProgress, setUploadProgress] = useState(0)
     const fileInputRef = useRef<HTMLInputElement>(null)
+
+    // Cleanup object URL on unmount
+    useEffect(() => {
+        return () => {
+            if (previewUrl && previewUrl.startsWith('blob:')) {
+                URL.revokeObjectURL(previewUrl)
+            }
+        }
+    }, [previewUrl])
 
     if (!currentUser) return null
 
@@ -43,7 +74,6 @@ const EditProfileView = () => {
 
     const handleSave = async () => {
         if (saving) return
-
         setSaving(true)
         setError('')
         setUploadProgress(0)
@@ -55,17 +85,10 @@ const EditProfileView = () => {
             let profilePhotoUrl: string | undefined
 
             if (selectedFile) {
-                // Upload to Firebase Storage
-                const ext = selectedFile.name.split('.').pop() || 'png'
-                const path = `avatars/${currentUser.id}_${Date.now()}.${ext}`
-
-                try {
-                    profilePhotoUrl = await uploadFile(selectedFile, path, (progress) => {
-                        setUploadProgress(Math.round(progress))
-                    })
-                } catch (uploadErr: any) {
-                    throw new Error(uploadErr.message || 'Error al subir la imagen a Firebase.')
-                }
+                // Compress client-side, send as base64 — Backend will upload to Storage
+                setUploadProgress(30)
+                profilePhotoUrl = await resizeImageToBase64(selectedFile)
+                setUploadProgress(60)
             }
 
             const body: Record<string, string> = { username: nickname, bio }
@@ -91,9 +114,12 @@ const EditProfileView = () => {
             }
             setPreviewUrl(null)
 
-            setUploadProgress(0)
+            setUploadProgress(100)
             setSaved(true)
-            setTimeout(() => setSaved(false), 2500)
+            setTimeout(() => {
+                setSaved(false)
+                setUploadProgress(0)
+            }, 2500)
         } catch (err: any) {
             console.error('Save profile error:', err)
             setError(err.message || 'Error al guardar los cambios. Por favor intenta de nuevo.')

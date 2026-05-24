@@ -134,7 +134,6 @@ export async function getPendingRequests(uid: string): Promise<
         .collection(REQUESTS)
         .where('toUserId', '==', uid)
         .where('status', '==', 'pending')
-        .orderBy('createdAt', 'desc')
         .get()
 
     const results = await Promise.all(
@@ -146,13 +145,15 @@ export async function getPendingRequests(uid: string): Promise<
                 requestId: req.requestId,
                 fromUser,
                 createdAt: req.createdAt.toDate().toISOString(),
+                _ts: req.createdAt.toMillis(), // helper for sorting
             }
         })
     )
 
-    return results.filter(
-        (r: { requestId: string; fromUser: ApiUser; createdAt: string } | null): r is { requestId: string; fromUser: ApiUser; createdAt: string } => r !== null
-    )
+    return results
+        .filter((r): r is any => r !== null)
+        .sort((a, b) => b._ts - a._ts)
+        .map(({ _ts, ...r }) => r)
 }
 
 /** Delete a contact relationship between two users */

@@ -2,7 +2,14 @@
 
 import { Response } from 'express'
 import { AuthRequest } from '../types'
-import { getUserById, updateUser, searchUsers, getAllUsers, deleteUserById } from '../services/userService'
+import {
+    getUserById,
+    updateUser,
+    searchUsers,
+    getAllUsers,
+    deleteUserById,
+    uploadProfilePhoto,
+} from '../services/userService'
 import {
     validateUsername,
     validateBio,
@@ -30,7 +37,7 @@ export async function getMe(req: AuthRequest, res: Response): Promise<void> {
 export async function updateMe(req: AuthRequest, res: Response): Promise<void> {
     try {
         const uid = req.user!.uid
-        const { username, bio, phone, profilePhotoUrl } = req.body
+        let { username, bio, phone, profilePhotoUrl } = req.body
 
         // Validate username if provided
         if (username !== undefined) {
@@ -42,10 +49,21 @@ export async function updateMe(req: AuthRequest, res: Response): Promise<void> {
         const bioResult = validateBio(bio)
         if (!bioResult.valid) { res.status(400).json({ error: bioResult.error }); return }
 
-        // Validate profilePhotoUrl if provided (must be https or empty)
+        // Handle profile photo: check if it's base64 (upload to Storage) or a URL (validate)
         if (profilePhotoUrl && profilePhotoUrl !== '') {
-            const urlResult = validateHttpsUrl(profilePhotoUrl)
-            if (!urlResult.valid) { res.status(400).json({ error: urlResult.error }); return }
+            if (profilePhotoUrl.startsWith('data:image/')) {
+                // Upload to Firebase Storage on the server to bypass CORS
+                try {
+                    profilePhotoUrl = await uploadProfilePhoto(uid, profilePhotoUrl)
+                } catch (err: any) {
+                    res.status(400).json({ error: err.message || 'Failed to upload photo' })
+                    return
+                }
+            } else {
+                // It's a URL, validate it
+                const urlResult = validateHttpsUrl(profilePhotoUrl)
+                if (!urlResult.valid) { res.status(400).json({ error: urlResult.error }); return }
+            }
         }
 
         // Sanitize phone

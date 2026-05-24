@@ -166,3 +166,33 @@ export async function deleteUserById(uid: string): Promise<void> {
     }
 }
 
+/**
+ * Upload a profile photo from base64 data to Firebase Storage (Admin SDK).
+ * Bypasses client-side CORS issues.
+ */
+export async function uploadProfilePhoto(uid: string, base64Data: string): Promise<string> {
+    // 1. Parse base64 string (e.g. "data:image/jpeg;base64,...")
+    const match = base64Data.match(/^data:(image\/[a-z]+);base64,(.+)$/)
+    if (!match) throw new Error('Formato de imagen inválido. Debe ser un data URL base64.')
+
+    const contentType = match[1]
+    const base64Content = match[2]
+    const buffer = Buffer.from(base64Content, 'base64')
+
+    // 2. Prepare storage file
+    const bucket = admin.storage().bucket()
+    const extension = contentType.split('/')[1] || 'png'
+    const fileName = `avatars/${uid}_${Date.now()}.${extension}`
+    const file = bucket.file(fileName)
+
+    // 3. Save to storage
+    await file.save(buffer, {
+        metadata: { contentType },
+        public: true, // Make it publicly accessible
+    })
+
+    // 4. Return the public URL
+    // Format: https://storage.googleapis.com/[bucket]/[fileName]
+    const bucketName = bucket.name
+    return `https://storage.googleapis.com/${bucketName}/${fileName}`
+}
