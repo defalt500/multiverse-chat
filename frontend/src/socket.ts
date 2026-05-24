@@ -13,6 +13,9 @@ let socket: Socket | null = null;
 // Rooms to re-join after reconnect (mobile browser wakeup / network switch)
 const pendingRooms = new Set<string>();
 
+/** true = event handlers already attached to this socket instance */
+let listenersAttached = false;
+
 /** Get a fresh Firebase ID token, updating localStorage so reconnects work */
 async function getFreshToken(): Promise<string | null> {
     try {
@@ -26,6 +29,78 @@ async function getFreshToken(): Promise<string | null> {
     }
 }
 
+/** Attach all event listeners exactly once per socket instance */
+function attachListeners(s: Socket) {
+    if (listenersAttached) return;
+    listenersAttached = true;
+
+    // ── Connection lifecycle ───────────────────────────────────────────────────
+    s.on('connect', () => {
+        console.log('🔌 Socket connected:', s.id);
+        // Re-join all known conversation rooms after reconnect
+        pendingRooms.forEach((roomId) => {
+            s.emit('join_conversation', { conversationId: roomId });
+        });
+        // On reconnect, reload conversations to catch any messages missed offline
+        useAppStore.getState().loadConversations();
+    });
+
+    s.on('connect_error', async (err) => {
+        console.warn('Socket connect error:', err.message);
+        if (
+            err.message.includes('expired') ||
+            err.message.includes('Invalid') ||
+            err.message.includes('token')
+        ) {
+            const freshToken = await getFreshToken();
+            if (freshToken && socket) {
+                (socket.auth as Record<string, string>).token = freshToken;
+            }
+        }
+    });
+
+    // ── Messages ───────────────────────────────────────────────────────────────
+    s.on('receive_message', (payload) => {
+        if (payload?.message) {
+            useAppStore.getState().receiveMessage(payload.message);
+        }
+    });
+
+    // ── Contact requests ────────────────────────────────────────────────────────
+    s.on('new_contact_request', (data) => {
+        if (data?.requestId && data?.fromUser) {
+            useAppStore.getState().addContactRequest({
+                requestId: data.requestId,
+                fromUser: data.fromUser,
+                createdAt: data.createdAt || new Date().toISOString(),
+            });
+        }
+    });
+
+    // ── Typing indicators ───────────────────────────────────────────────────────
+    s.on('typing', ({ conversationId, userId }: { conversationId: string; userId: string }) => {
+        useAppStore.getState().setTyping(conversationId, userId, true);
+    });
+
+    s.on('stop_typing', ({ conversationId, userId }: { conversationId: string; userId: string }) => {
+        useAppStore.getState().setTyping(conversationId, userId, false);
+    });
+
+    // ── Presence ────────────────────────────────────────────────────────────────
+    // Update isOnline directly on conversations — NO Firestore call needed
+    s.on('user_status', ({ userId, isOnline }: { userId: string; isOnline: boolean }) => {
+        if (!userId) return;
+        // Update isOnline on all conversations where this user is a participant
+        useAppStore.setState((state) => ({
+            conversations: state.conversations.map((conv) => {
+                const isParticipant = conv.participants?.includes(userId);
+                if (!isParticipant) return conv;
+                return { ...conv, isOnline };
+            }),
+        }));
+    });
+}
+
 export const initSocket = async (): Promise<Socket | null> => {
     // Already connected — nothing to do
     if (socket?.connected) return socket;
@@ -33,7 +108,7 @@ export const initSocket = async (): Promise<Socket | null> => {
     const token = await getFreshToken();
     if (!token) return null;
 
-    // If socket exists but disconnected — update auth token + reconnect
+    // If socket exists but disconnected — update auth token + reconnect (reuse listener set)
     if (socket) {
         (socket.auth as Record<string, string>).token = token;
         socket.connect();
@@ -50,63 +125,7 @@ export const initSocket = async (): Promise<Socket | null> => {
         timeout: 10000,
     });
 
-    socket.on('connect', () => {
-        console.log('🔌 Socket connected:', socket?.id);
-        // Re-join all conversation rooms after reconnect
-        pendingRooms.forEach((roomId) => {
-            socket?.emit('join_conversation', { conversationId: roomId });
-        });
-        // Reload conversations on reconnect to catch messages received while offline
-        useAppStore.getState().loadConversations();
-    });
-
-    // On connect_error (e.g. expired token) — refresh token and retry
-    socket.on('connect_error', async (err) => {
-        console.warn('Socket connect error:', err.message);
-        if (err.message.includes('expired') || err.message.includes('Invalid') || err.message.includes('token')) {
-            const freshToken = await getFreshToken();
-            if (freshToken && socket) {
-                (socket.auth as Record<string, string>).token = freshToken;
-            }
-        }
-    });
-
-    socket.on('receive_message', (payload) => {
-        if (payload?.message) {
-            useAppStore.getState().receiveMessage(payload.message);
-        }
-    });
-
-    // Real-time contact request — receiver gets instant notification
-    socket.on('new_contact_request', (data) => {
-        if (data?.requestId && data?.fromUser) {
-            useAppStore.getState().addContactRequest({
-                requestId: data.requestId,
-                fromUser: data.fromUser,
-                createdAt: data.createdAt || new Date().toISOString(),
-            });
-        }
-    });
-
-    // Typing indicators
-    socket.on('typing', ({ conversationId, userId }: { conversationId: string; userId: string }) => {
-        useAppStore.getState().setTyping(conversationId, userId, true);
-    });
-
-    socket.on('stop_typing', ({ conversationId, userId }: { conversationId: string; userId: string }) => {
-        useAppStore.getState().setTyping(conversationId, userId, false);
-    });
-
-    // ── Presence: real-time online/offline status from server ─────────────────
-    // Server broadcasts user_status when someone connects/disconnects
-    // The 60s periodic loadConversations in ChatPage re-fetches isOnline from the backend.
-    // This event is a hint to trigger an early refresh when a change happens.
-    socket.on('user_status', ({ userId }: { userId: string; isOnline: boolean }) => {
-        if (!userId) return;
-        // Trigger a lightweight conversation refresh so the UI updates promptly
-        // without waiting for the 60s periodic timer
-        useAppStore.getState().loadConversations();
-    });
+    attachListeners(socket);
 
     return socket;
 };
@@ -122,6 +141,7 @@ export const joinConversation = (conversationId: string) => {
 export const getSocket = () => socket;
 
 export const disconnectSocket = () => {
+    listenersAttached = false;
     if (socket) {
         socket.disconnect();
         socket = null;

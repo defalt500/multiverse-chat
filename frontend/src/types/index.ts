@@ -36,6 +36,10 @@ export interface Conversation {
     isTyping: boolean
     isGroup: boolean
     messages: Message[]
+    // AI conversation metadata
+    type?: 'user' | 'ai'
+    aiCharacterId?: string
+    participants?: string[]
 }
 
 export type ActiveView = 'chats' | 'profile' | 'contacts' | 'settings' | 'add-contact'

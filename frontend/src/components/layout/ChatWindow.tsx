@@ -20,12 +20,14 @@ const ChatWindow = () => {
 
     const conversation = conversations.find((c) => c.id === activeConversationId)
 
-    // Detect AI conversations
+    // Detect AI conversations — check conv.type first (works for fresh empty AI chats),
+    // fall back to sender check for backwards compatibility
     const isAIConversation = Boolean(
-        conversation && !conversation.isGroup && (
-            conversation.messages.some(
+        conversation && (
+            conversation.type === 'ai' ||
+            (!conversation.isGroup && conversation.messages.some(
                 m => m.senderId !== currentUser?.id && m.senderId?.startsWith('ai-')
-            ) ||
+            )) ||
             (activeConversationId && Array.from(typingState[activeConversationId] ?? []).some(
                 id => id.startsWith('ai-')
             ))

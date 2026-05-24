@@ -11,9 +11,9 @@ const CONVS = 'conversations'
 /** Convert a Firestore conversation doc to ApiConversation shape (exported for controller use) */
 export async function toApiConversation(
     doc: DbConversation,
-    currentUid: string
+    currentUid: string,
+    withMessages = false
 ): Promise<ApiConversation> {
-    // Get the other participant's info (for 1-1 chats)
     let name = 'Unknown'
     let avatar = ''
     let isOnline = false
@@ -39,8 +39,8 @@ export async function toApiConversation(
         }
     }
 
-    // Fetch recent messages
-    const messages = await getMessages(doc.conversationId, 50)
+    // Only fetch messages when explicitly requested (single conv view, not list)
+    const messages = withMessages ? await getMessages(doc.conversationId, 50) : []
 
     return {
         id: doc.conversationId,

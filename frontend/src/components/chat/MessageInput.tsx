@@ -8,7 +8,7 @@ interface Props {
     conversationId: string
 }
 
-const TYPING_THROTTLE_MS = 2000   // only re-emit typing every 2 s
+const TYPING_THROTTLE_MS = 500   // re-emit typing every 500ms max
 
 const MessageInput = ({ conversationId }: Props) => {
     const [text, setText] = useState('')
@@ -18,6 +18,15 @@ const MessageInput = ({ conversationId }: Props) => {
     const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
     const lastTypingEmit = useRef<number>(0)
     const pickerRef = useRef<HTMLDivElement>(null)
+
+    // Send stop_typing when switching conversations or unmounting
+    useEffect(() => {
+        return () => {
+            if (typingTimer.current) clearTimeout(typingTimer.current)
+            const socket = getSocket()
+            if (socket?.connected) socket.emit('stop_typing', { conversationId })
+        }
+    }, [conversationId])
 
     // Close emoji picker when clicking outside
     useEffect(() => {
@@ -40,13 +49,14 @@ const MessageInput = ({ conversationId }: Props) => {
         socket.emit('typing', { conversationId })
     }
 
-    // Emit stop_typing after user stops for 1.5 s
+    // Emit stop_typing after user stops for 2 s
+    // (2s gives AI time to acknowledge typing before response arrives)
     const scheduleStopTyping = () => {
         if (typingTimer.current) clearTimeout(typingTimer.current)
         typingTimer.current = setTimeout(() => {
             const socket = getSocket()
             if (socket?.connected) socket.emit('stop_typing', { conversationId })
-        }, 1500)
+        }, 2000)
     }
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
