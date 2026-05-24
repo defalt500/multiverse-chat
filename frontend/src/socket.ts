@@ -41,8 +41,10 @@ function attachListeners(s: Socket) {
         pendingRooms.forEach((roomId) => {
             s.emit('join_conversation', { conversationId: roomId });
         });
-        // On reconnect, reload conversations to catch any messages missed offline
-        useAppStore.getState().loadConversations();
+        // On reconnect, reload conversations/requests to catch anything missed offline
+        const store = useAppStore.getState();
+        store.loadConversations();
+        store.loadPendingRequests();
     });
 
     s.on('connect_error', async (err) => {

@@ -106,17 +106,17 @@ service cloud.firestore {
     match /contactRequests/{requestId} {
       // Sender and receiver can read a contact request
       allow read: if isAuth() &&
-        (request.auth.uid == resource.data.fromUid ||
-         request.auth.uid == resource.data.toUid);
+        (request.auth.uid == resource.data.fromUserId ||
+         request.auth.uid == resource.data.toUserId);
 
       // Any authenticated user can create a request (sender must be themselves)
-      allow create: if isAuth() && request.auth.uid == request.resource.data.fromUid;
+      allow create: if isAuth() && request.auth.uid == request.resource.data.fromUserId;
 
       // Receiver can update (accept/decline), sender can delete
-      allow update: if isAuth() && request.auth.uid == resource.data.toUid;
+      allow update: if isAuth() && request.auth.uid == resource.data.toUserId;
       allow delete: if isAuth() &&
-        (request.auth.uid == resource.data.fromUid ||
-         request.auth.uid == resource.data.toUid);
+        (request.auth.uid == resource.data.fromUserId ||
+         request.auth.uid == resource.data.toUserId);
     }
 
     // ─── Backups — Admin Only ──────────────────────────────────────────────────

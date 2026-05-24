@@ -2,28 +2,7 @@ import { useState, useRef } from 'react'
 import { useAppStore } from '../../store/useAppStore'
 import Avatar from '../ui/Avatar'
 import { fetchApi } from '../../api'
-
-/** Resize an image File to max 400×400px and return as base64 JPEG data URL */
-function resizeImageToBase64(file: File, maxSize = 400, quality = 0.75): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const img = new Image()
-        const url = URL.createObjectURL(file)
-        img.onload = () => {
-            URL.revokeObjectURL(url)
-            const scale = Math.min(maxSize / img.width, maxSize / img.height, 1)
-            const w = Math.round(img.width * scale)
-            const h = Math.round(img.height * scale)
-            const canvas = document.createElement('canvas')
-            canvas.width = w
-            canvas.height = h
-            const ctx = canvas.getContext('2d')!
-            ctx.drawImage(img, 0, 0, w, h)
-            resolve(canvas.toDataURL('image/jpeg', quality))
-        }
-        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Error al cargar la imagen')) }
-        img.src = url
-    })
-}
+import { uploadFile, validateImageFile } from '../../utils/storage'
 
 const EditProfileView = () => {
     const { currentUser, updateCurrentUser } = useAppStore()
@@ -35,6 +14,7 @@ const EditProfileView = () => {
     const [error, setError] = useState('')
     const [previewUrl, setPreviewUrl] = useState<string | null>(null)
     const [selectedFile, setSelectedFile] = useState<File | null>(null)
+    const [uploadProgress, setUploadProgress] = useState(0)
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     if (!currentUser) return null
@@ -42,6 +22,14 @@ const EditProfileView = () => {
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
         if (!file) return
+
+        const validation = validateImageFile(file)
+        if (!validation.valid) {
+            setError(validation.error!)
+            return
+        }
+
+        setError('')
         setSelectedFile(file)
         const reader = new FileReader()
         reader.onload = (ev) => setPreviewUrl(ev.target?.result as string)
@@ -51,12 +39,17 @@ const EditProfileView = () => {
     const handleSave = async () => {
         setSaving(true)
         setError('')
+        setUploadProgress(0)
         try {
             let profilePhotoUrl: string | undefined
 
             if (selectedFile) {
-                // Resize + compress client-side, send as base64 — no Storage bucket required
-                profilePhotoUrl = await resizeImageToBase64(selectedFile)
+                // Upload to Firebase Storage
+                const ext = selectedFile.name.split('.').pop() || 'png'
+                const path = `avatars/${currentUser.id}_${Date.now()}.${ext}`
+                profilePhotoUrl = await uploadFile(selectedFile, path, (progress) => {
+                    setUploadProgress(Math.round(progress))
+                })
             }
 
             const body: Record<string, string> = { username: nickname, bio }
@@ -66,12 +59,12 @@ const EditProfileView = () => {
                 method: 'PUT',
                 body: JSON.stringify(body),
             })
-            const updated = res?.user
-                ? res.user
-                : { nickname, bio, ...(profilePhotoUrl ? { avatar: profilePhotoUrl } : {}) }
+
+            const updated = res?.user || { ...currentUser, username: nickname, bio, avatar: profilePhotoUrl || currentUser.avatar }
             updateCurrentUser(updated)
             setSelectedFile(null)
             setPreviewUrl(null)
+            setUploadProgress(0)
             setSaved(true)
             setTimeout(() => setSaved(false), 2500)
         } catch (err: any) {
@@ -173,6 +166,16 @@ const EditProfileView = () => {
                     </div>
                 )}
 
+                {/* Saving / Progress */}
+                {saving && uploadProgress > 0 && uploadProgress < 100 && (
+                    <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-1.5 overflow-hidden">
+                        <div
+                            className="bg-primary h-full transition-all duration-300"
+                            style={{ width: `${uploadProgress}%` }}
+                        />
+                    </div>
+                )}
+
                 {/* Save Button */}
                 <button
                     onClick={handleSave}
@@ -188,7 +191,7 @@ const EditProfileView = () => {
                                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                             </svg>
-                            Guardando...
+                            {uploadProgress > 0 && uploadProgress < 100 ? `Subiendo (${uploadProgress}%)` : 'Guardando...'}
                         </>
                     ) : saved ? (
                         <>
