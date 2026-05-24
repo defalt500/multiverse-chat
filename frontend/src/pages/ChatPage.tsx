@@ -16,6 +16,8 @@ const ChatPage = () => {
     useEffect(() => {
         let refreshTimer: ReturnType<typeof setInterval> | null = null
         let pollTimer: ReturnType<typeof setInterval> | null = null
+        let tokenTimer: ReturnType<typeof setInterval> | null = null
+        let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 
         const boot = async () => {
             const socket = await initSocket()
@@ -25,21 +27,38 @@ const ChatPage = () => {
                 conversations.forEach(c => joinConversation(c.id))
             }
 
-            // Refresh data in case messages/requests were missed while offline
+            // Refresh conversation list & pending requests on boot
             loadConversations()
             loadPendingRequests()
         }
 
         boot()
 
+        // ── Periodic conversation refresh ─────────────────────────────────────
+        // Ensures sidebar shows correct lastMessage and unreadCount even after
+        // reconnects, browser wake from sleep, or missed socket events
+        refreshTimer = setInterval(() => {
+            loadConversations()
+        }, 60_000) // every 60 seconds
+
         // Poll pending contact requests every 30s as a fallback for missed socket events
         pollTimer = setInterval(() => {
             loadPendingRequests()
         }, 30_000)
 
-        // Refresh Firebase token every 50 min
+        // ── Presence heartbeat ────────────────────────────────────────────────
+        // Emits a heartbeat every 30s so the server can accurately track lastActive
+        // and mark users offline if they lose connection without a clean disconnect
+        heartbeatTimer = setInterval(() => {
+            const s = getSocket()
+            if (s?.connected) {
+                s.emit('heartbeat')
+            }
+        }, 30_000)
+
+        // ── Firebase token refresh every 50 min ───────────────────────────────
         const scheduleTokenRefresh = () => {
-            refreshTimer = setInterval(async () => {
+            tokenTimer = setInterval(async () => {
                 try {
                     const user = getFirebaseAuth().currentUser
                     if (!user) return
@@ -56,6 +75,8 @@ const ChatPage = () => {
         return () => {
             if (refreshTimer) clearInterval(refreshTimer)
             if (pollTimer) clearInterval(pollTimer)
+            if (tokenTimer) clearInterval(tokenTimer)
+            if (heartbeatTimer) clearInterval(heartbeatTimer)
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])

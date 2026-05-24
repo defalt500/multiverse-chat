@@ -5,6 +5,7 @@ import express from 'express'
 import http from 'http'
 import { Server } from 'socket.io'
 import cors from 'cors'
+import helmet from 'helmet'
 import dotenv from 'dotenv'
 
 dotenv.config()
@@ -17,7 +18,7 @@ import { messagesRouter } from './routes/messages'
 import { aiRouter } from './routes/ai'
 import { backupRouter } from './routes/backup'
 import { errorHandler } from './middlewares/errorHandler'
-import { generalLimiter } from './middlewares/rateLimiter'
+import { generalLimiter, authLimiter, messageLimiter, adminLimiter } from './middlewares/rateLimiter'
 import { registerSocketHandlers } from './sockets/chatSocket'
 import { seedDefaultCharacters } from './services/aiCharacterService'
 import { seedDefaultUsers } from './services/seederService'
@@ -25,25 +26,50 @@ import { startBackupScheduler } from './services/backupScheduler'
 
 const PORT = process.env.PORT || 5000
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173'
+const isProd = process.env.NODE_ENV === 'production'
 
 // ─── Express App ──────────────────────────────────────────────────────────────
 
 const app = express()
 const httpServer = http.createServer(app)
 
+// ─── Security Headers (Helmet) ────────────────────────────────────────────────
+
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", 'data:', 'https:'],
+            connectSrc: ["'self'", 'https:', 'wss:'],
+            fontSrc: ["'self'", 'https:'],
+            objectSrc: ["'none'"],
+            upgradeInsecureRequests: isProd ? [] : null,
+        },
+    },
+    crossOriginEmbedderPolicy: false, // Allow Firebase SDKs to load
+}))
+
+// Disable X-Powered-By (helmet already does this, but be explicit)
+app.disable('x-powered-by')
+
 // ─── CORS ─────────────────────────────────────────────────────────────────────
 
-// Accept localhost AND any private-network IP (for mobile access on LAN)
+// In production: only allow the configured CLIENT_URL and Firebase Hosting origins
+// In development: also allow localhost and private LAN IPs for mobile testing
 const isAllowedOrigin = (origin: string | undefined): boolean => {
-    if (!origin) return true                                          // curl / Postman
-    if (origin === CLIENT_URL) return true                            // Deployed frontend (web.app)
-    // Firebase Hosting always provides both *.web.app AND *.firebaseapp.com — allow both
+    if (!origin) return !isProd  // curl/Postman only allowed in dev
+    if (origin === CLIENT_URL) return true
+    // Firebase Hosting: *.web.app and *.firebaseapp.com
     if (/^https:\/\/[\w-]+\.web\.app$/.test(origin)) return true
     if (/^https:\/\/[\w-]+\.firebaseapp\.com$/.test(origin)) return true
-    if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return true    // localhost:*
-    if (/^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) return true // loopback
-    // Private subnets: 192.168.x.x, 10.x.x.x, 172.16-31.x.x
-    if (/^https?:\/\/(192\.168|10\.\d+|172\.(1[6-9]|2\d|3[01]))\.\d+\.\d+(:\d+)?$/.test(origin)) return true
+    if (!isProd) {
+        if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return true
+        if (/^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) return true
+        // Private subnets for local mobile testing
+        if (/^https?:\/\/(192\.168|10\.\d+|172\.(1[6-9]|2\d|3[01]))\.\d+\.\d+(:\d+)?$/.test(origin)) return true
+    }
     return false
 }
 
@@ -63,12 +89,8 @@ app.use(cors({
 
 // ─── Body Parsing ─────────────────────────────────────────────────────────────
 
-app.use(express.json({ limit: '1mb' }))
-app.use(express.urlencoded({ extended: true }))
-
-// ─── Rate Limiting ────────────────────────────────────────────────────────────
-
-app.use('/api', generalLimiter)
+app.use(express.json({ limit: '500kb' }))         // reduced from 1mb
+app.use(express.urlencoded({ extended: true, limit: '100kb' }))
 
 // ─── Root Route ──────────────────────────────────────────────────────────────
 
@@ -77,8 +99,6 @@ app.get('/', (_req, res) => {
         message: 'Backend working ✅',
         app: 'Multiverse Chat API',
         version: '1.0.0',
-        docs: '/health',
-        api: '/api/*',
     })
 })
 
@@ -89,20 +109,22 @@ app.get('/health', (_req, res) => {
         status: 'ok',
         app: 'Multiverse Chat API',
         timestamp: new Date().toISOString(),
-        version: '1.0.0',
     })
 })
 
 
-// ─── API Routes ───────────────────────────────────────────────────────────────
+// ─── API Routes (with granular rate limits) ───────────────────────────────────
 
-app.use('/api/auth', authRouter)
+app.use('/api/auth', authLimiter, authRouter)
+app.use('/api/messages', messageLimiter, messagesRouter)
+app.use('/api/backups', adminLimiter, backupRouter)
+
+// General limiter covers the remaining API routes
+app.use('/api', generalLimiter)
 app.use('/api/users', usersRouter)
 app.use('/api/contacts', contactsRouter)
 app.use('/api/conversations', conversationsRouter)
-app.use('/api/messages', messagesRouter)
 app.use('/api/ai', aiRouter)
-app.use('/api/backups', backupRouter)
 
 // ─── 404 Handler ─────────────────────────────────────────────────────────────
 
@@ -127,6 +149,7 @@ const io = new Server(httpServer, {
     },
     pingTimeout: 60000,
     pingInterval: 25000,
+    maxHttpBufferSize: 64 * 1024, // 64KB max payload per socket message
 })
 
 registerSocketHandlers(io)

@@ -1,0 +1,132 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helper Functions ────────────────────────────────────────────────────
+
+    /** Is the requesting user authenticated? */
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    /** Is the requesting user the owner of this document? */
+    function isOwner(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+
+    /** Does the requesting user have the 'admin' role in Firestore? */
+    function isAdmin() {
+      return isAuth() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    /** Is the requesting user a participant in the given conversation? */
+    function isConversationParticipant(convId) {
+      return isAuth() &&
+        exists(/databases/$(database)/documents/conversations/$(convId)) &&
+        request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participants;
+    }
+
+    // ─── Users Collection ────────────────────────────────────────────────────
+    match /users/{userId} {
+      // Any authenticated user can read any profile (needed for search, contact display)
+      allow read: if isAuth();
+
+      // Only the owner can create their profile
+      allow create: if isOwner(userId);
+
+      // Owner can update — but CANNOT promote themselves to admin
+      allow update: if isOwner(userId) &&
+        // Prevent privilege escalation: role field cannot be changed by owner
+        (!request.resource.data.keys().hasAny(['role']) ||
+          request.resource.data.role == resource.data.role);
+
+      // Admin can read and write all user documents (for admin dashboard)
+      allow write: if isAdmin();
+
+      // Nobody can delete their user document directly (use backend)
+      allow delete: if isAdmin();
+    }
+
+    // ─── Conversations Collection ─────────────────────────────────────────────
+    match /conversations/{conversationId} {
+      // Only participants can read a conversation
+      allow read: if isAuth() && request.auth.uid in resource.data.participants;
+
+      // Authenticated users can create a conversation if they are a participant
+      allow create: if isAuth() && request.auth.uid in request.resource.data.participants;
+
+      // Only participants can update (e.g. lastMessage, updatedAt)
+      allow update: if isAuth() && request.auth.uid in resource.data.participants;
+
+      // Only participants can delete their own conversation
+      allow delete: if isAuth() && request.auth.uid in resource.data.participants;
+    }
+
+    // ─── Messages Subcollection ───────────────────────────────────────────────
+    match /conversations/{conversationId}/messages/{messageId} {
+      // Only conversation participants can read messages
+      allow read: if isConversationParticipant(conversationId);
+
+      // Only conversation participants can send messages
+      allow create: if isConversationParticipant(conversationId) &&
+        // Message sender must be the requesting user (or an ai- prefixed bot sender is also accepted via backend)
+        (request.resource.data.senderId == request.auth.uid ||
+         request.resource.data.senderId.matches('ai-.*'));
+
+      // Only the message sender can update/delete their own message
+      allow update: if isConversationParticipant(conversationId) &&
+        request.auth.uid == resource.data.senderId;
+      allow delete: if isConversationParticipant(conversationId) &&
+        request.auth.uid == resource.data.senderId;
+    }
+
+    // ─── AI Characters Collection ─────────────────────────────────────────────
+    match /aiCharacters/{characterId} {
+      // Any authenticated user can list/read AI characters
+      allow read: if isAuth();
+
+      // Only admin can create, update, or delete AI characters
+      allow write: if isAdmin();
+    }
+
+    // ─── Contacts Collection ──────────────────────────────────────────────────
+    match /contacts/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId);
+
+      match /contactList/{contactId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId);
+      }
+    }
+
+    // ─── Contact Requests Collection ──────────────────────────────────────────
+    match /contactRequests/{requestId} {
+      // Sender and receiver can read a contact request
+      allow read: if isAuth() &&
+        (request.auth.uid == resource.data.fromUid ||
+         request.auth.uid == resource.data.toUid);
+
+      // Any authenticated user can create a request (sender must be themselves)
+      allow create: if isAuth() && request.auth.uid == request.resource.data.fromUid;
+
+      // Receiver can update (accept/decline), sender can delete
+      allow update: if isAuth() && request.auth.uid == resource.data.toUid;
+      allow delete: if isAuth() &&
+        (request.auth.uid == resource.data.fromUid ||
+         request.auth.uid == resource.data.toUid);
+    }
+
+    // ─── Backups — Admin Only ──────────────────────────────────────────────────
+    match /backups/{backupId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ─── Default: Deny Everything Else ────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -25,9 +25,32 @@ import { updateLastMessage, getConversationById } from '../services/conversation
 import { updateMessageStatus } from '../services/messageService'
 import { generateReplyForConversation } from '../services/aiService'
 import { getCharacterById } from '../services/aiCharacterService'
+import { validateFirestoreId, validateMessageContent } from '../middlewares/validation'
 
 /** Map of userId → socketId for routing AI replies and status */
 const userSockets = new Map<string, string>()
+
+/** Per-socket message rate limiting: messages sent per window */
+const socketMessageCounts = new Map<string, { count: number; resetAt: number }>()
+const MSG_RATE_LIMIT = 20        // max messages per window
+const MSG_RATE_WINDOW = 30_000   // 30 seconds
+
+/** Check if a socket has exceeded the per-socket message rate limit */
+function isMessageRateLimited(socketId: string): boolean {
+    const now = Date.now()
+    const entry = socketMessageCounts.get(socketId)
+    if (!entry || now > entry.resetAt) {
+        socketMessageCounts.set(socketId, { count: 1, resetAt: now + MSG_RATE_WINDOW })
+        return false
+    }
+    entry.count++
+    return entry.count > MSG_RATE_LIMIT
+}
+
+/** Clean up rate limit map when a socket disconnects */
+function cleanupSocketRateLimit(socketId: string): void {
+    socketMessageCounts.delete(socketId)
+}
 
 let globalIo: Server | null = null
 
@@ -46,7 +69,6 @@ export function registerSocketHandlers(io: Server): void {
             if (!token) return next(new Error('Missing auth token'))
 
             const decoded = await auth.verifyIdToken(token)
-            // Attach user info to socket data for use in event handlers
             socket.data.uid = decoded.uid
             socket.data.email = decoded.email || ''
             next()
@@ -66,53 +88,98 @@ export function registerSocketHandlers(io: Server): void {
         userSockets.set(uid, socket.id)
         await setOnlineStatus(uid, true).catch(() => { })
 
+        // Broadcast online status to all connected clients
+        io.emit('user_status', { userId: uid, isOnline: true })
+
         // ── Join a conversation room ─────────────────────────────────────────
-        socket.on('join_conversation', ({ conversationId }: { conversationId: string }) => {
-            if (!conversationId) return
-            socket.join(conversationId)
+        socket.on('join_conversation', async ({ conversationId }: { conversationId: string }) => {
+            // Validate conversationId format
+            if (!validateFirestoreId(conversationId).valid) return
+
+            try {
+                // Verify the requesting user is actually a participant
+                const conv = await getConversationById(conversationId)
+                if (!conv) return
+                const isParticipant =
+                    conv.participants.includes(uid) ||
+                    // Also allow AI conversation owner
+                    (conv.type === 'ai' && conv.participants.includes(uid))
+                if (!isParticipant) {
+                    socket.emit('error', { error: 'Not a participant of this conversation' })
+                    return
+                }
+                socket.join(conversationId)
+            } catch {
+                // Silently fail — don't leak error details
+            }
         })
 
         // ── Send a message ───────────────────────────────────────────────────
         socket.on(
             'send_message',
             async ({ conversationId, content }: { conversationId: string; content: string }) => {
-                if (!conversationId || !content?.trim()) return
+                // Per-socket rate limiting
+                if (isMessageRateLimited(socket.id)) {
+                    socket.emit('error', { error: 'Message rate limit exceeded. Please slow down.' })
+                    return
+                }
+
+                // Validate conversationId
+                if (!validateFirestoreId(conversationId).valid) return
+
+                // Validate and sanitize message content
+                const contentResult = validateMessageContent(content)
+                if (!contentResult.valid) {
+                    socket.emit('error', { error: contentResult.error })
+                    return
+                }
+                const sanitizedContent = contentResult.sanitized!
 
                 try {
+                    // Verify user is participant before saving
+                    const conv = await getConversationById(conversationId)
+                    if (!conv || !conv.participants.includes(uid)) {
+                        socket.emit('error', { error: 'Unauthorized' })
+                        return
+                    }
+
                     // Get sender info for senderName
                     const sender = await getUserById(uid)
                     const senderName = sender?.name || 'User'
 
                     // 1. Persist message to Firestore
-                    const message = await saveMessage(conversationId, uid, senderName, content.trim())
+                    const message = await saveMessage(conversationId, uid, senderName, sanitizedContent)
 
                     // 2. Update conversation's lastMessage
-                    await updateLastMessage(conversationId, content.trim())
+                    await updateLastMessage(conversationId, sanitizedContent)
 
                     // 3. Broadcast to all participants in the room
                     io.to(conversationId).emit('receive_message', { message })
 
                     // 4. If this is an AI conversation, generate and send AI reply
-                    const conv = await getConversationById(conversationId)
                     const aiId = conv?.aiType || conv?.aiCharacterId
                     if (conv?.type === 'ai' && aiId) {
-                        await handleAiReply(io, conversationId, aiId, content.trim())
+                        await handleAiReply(io, conversationId, aiId, sanitizedContent)
                     }
                 } catch (err) {
-                    const errMsg = err instanceof Error ? err.message : 'Failed to send message'
-                    socket.emit('error', { error: errMsg })
+                    socket.emit('error', { error: 'Failed to send message' })
                 }
             }
         )
 
+        // ── Heartbeat — keeps lastActive fresh for accurate presence ────────
+        socket.on('heartbeat', async () => {
+            await setOnlineStatus(uid, true).catch(() => { })
+        })
+
         // ── Typing indicators ────────────────────────────────────────────────
         socket.on('typing', ({ conversationId }: { conversationId: string }) => {
-            if (!conversationId) return
+            if (!validateFirestoreId(conversationId).valid) return
             socket.to(conversationId).emit('typing', { conversationId, userId: uid })
         })
 
         socket.on('stop_typing', ({ conversationId }: { conversationId: string }) => {
-            if (!conversationId) return
+            if (!validateFirestoreId(conversationId).valid) return
             socket.to(conversationId).emit('stop_typing', { conversationId, userId: uid })
         })
 
@@ -126,7 +193,8 @@ export function registerSocketHandlers(io: Server): void {
                 conversationId: string
                 messageId: string
             }) => {
-                if (!conversationId || !messageId) return
+                if (!validateFirestoreId(conversationId).valid) return
+                if (!validateFirestoreId(messageId).valid) return
                 await updateMessageStatus(conversationId, messageId, 'delivered').catch(() => { })
             }
         )
@@ -140,9 +208,9 @@ export function registerSocketHandlers(io: Server): void {
                 conversationId: string
                 messageId: string
             }) => {
-                if (!conversationId || !messageId) return
+                if (!validateFirestoreId(conversationId).valid) return
+                if (!validateFirestoreId(messageId).valid) return
                 await updateMessageStatus(conversationId, messageId, 'read').catch(() => { })
-                // Notify the conversation room that the message was read
                 io.to(conversationId).emit('message_read', { conversationId, messageId, readBy: uid })
             }
         )
@@ -151,7 +219,16 @@ export function registerSocketHandlers(io: Server): void {
         socket.on('disconnect', async () => {
             console.log(`🔌 Socket disconnected: ${socket.id} (uid: ${uid})`)
             userSockets.delete(uid)
-            await setOnlineStatus(uid, false).catch(() => { })
+            cleanupSocketRateLimit(socket.id)
+
+            // Only mark offline if this uid has no other connected sockets
+            // (handles multiple tabs: user should stay online if another tab is open)
+            const hasOtherSocket = userSockets.has(uid) && userSockets.get(uid) !== socket.id
+            if (!hasOtherSocket) {
+                await setOnlineStatus(uid, false).catch(() => { })
+                // Broadcast offline status to all connected clients
+                io.emit('user_status', { userId: uid, isOnline: false })
+            }
         })
     })
 
@@ -190,13 +267,10 @@ async function handleAiReply(
 
         const aiUid = `ai-${characterId}`
 
-        console.log("AI request:", userMessage, aiUid);
-
         // Signal that the AI is "typing" while generating
         io.to(conversationId).emit('typing', { conversationId, userId: aiUid })
 
-        // Generate the reply using Gemini
-        let replyContent = '';
+        let replyContent = ''
         try {
             replyContent = await generateReplyForConversation(
                 conversationId,
@@ -204,11 +278,9 @@ async function handleAiReply(
                 userMessage,
                 aiUid
             )
-            console.log("AI response:", replyContent);
         } catch (error) {
-            console.error("Gemini error:", error);
-            // Fallback response explicitly requested by user
-            replyContent = "Lo siento, no pude generar una respuesta en este momento.";
+            console.error('Gemini error:', error)
+            replyContent = 'Lo siento, no pude generar una respuesta en este momento.'
         }
 
         // Stop the typing indicator

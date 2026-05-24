@@ -3,9 +3,7 @@ import { useAppStore } from './store/useAppStore';
 import { getAuthToken, setAuthToken } from './api';
 import { getFirebaseAuth } from './config/firebase';
 
-// Derive socket URL the same way the REST API does:
-// If VITE_API_URL is set, strip /api. Otherwise use the hostname the page was served from.
-// This ensures mobile devices connect to the LAN server, not localhost (the phone itself).
+// Derive socket URL the same way the REST API does
 const SOCKET_URL = import.meta.env.VITE_API_URL
     ? import.meta.env.VITE_API_URL.replace('/api', '')
     : `http://${window.location.hostname}:5000`;
@@ -20,12 +18,11 @@ async function getFreshToken(): Promise<string | null> {
     try {
         const firebaseUser = getFirebaseAuth().currentUser;
         if (!firebaseUser) return getAuthToken();
-        // forceRefresh=true ensures we get a new token even if the old one is cached
         const freshToken = await firebaseUser.getIdToken(true);
-        setAuthToken(freshToken);        // persist in localStorage
+        setAuthToken(freshToken);
         return freshToken;
     } catch {
-        return getAuthToken();           // fallback to stored token
+        return getAuthToken();
     }
 }
 
@@ -33,7 +30,6 @@ export const initSocket = async (): Promise<Socket | null> => {
     // Already connected — nothing to do
     if (socket?.connected) return socket;
 
-    // Get a fresh token (refreshes if Firebase user is available)
     const token = await getFreshToken();
     if (!token) return null;
 
@@ -48,7 +44,7 @@ export const initSocket = async (): Promise<Socket | null> => {
         auth: { token },
         withCredentials: true,
         reconnection: true,
-        reconnectionAttempts: Infinity,   // keep retrying on mobile
+        reconnectionAttempts: Infinity,
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
         timeout: 10000,
@@ -60,13 +56,14 @@ export const initSocket = async (): Promise<Socket | null> => {
         pendingRooms.forEach((roomId) => {
             socket?.emit('join_conversation', { conversationId: roomId });
         });
+        // Reload conversations on reconnect to catch messages received while offline
+        useAppStore.getState().loadConversations();
     });
 
     // On connect_error (e.g. expired token) — refresh token and retry
     socket.on('connect_error', async (err) => {
         console.warn('Socket connect error:', err.message);
         if (err.message.includes('expired') || err.message.includes('Invalid') || err.message.includes('token')) {
-            // Refresh the token and update socket auth before next reconnect attempt
             const freshToken = await getFreshToken();
             if (freshToken && socket) {
                 (socket.auth as Record<string, string>).token = freshToken;
@@ -100,6 +97,17 @@ export const initSocket = async (): Promise<Socket | null> => {
         useAppStore.getState().setTyping(conversationId, userId, false);
     });
 
+    // ── Presence: real-time online/offline status from server ─────────────────
+    // Server broadcasts user_status when someone connects/disconnects
+    // The 60s periodic loadConversations in ChatPage re-fetches isOnline from the backend.
+    // This event is a hint to trigger an early refresh when a change happens.
+    socket.on('user_status', ({ userId }: { userId: string; isOnline: boolean }) => {
+        if (!userId) return;
+        // Trigger a lightweight conversation refresh so the UI updates promptly
+        // without waiting for the 60s periodic timer
+        useAppStore.getState().loadConversations();
+    });
+
     return socket;
 };
 
@@ -109,7 +117,6 @@ export const joinConversation = (conversationId: string) => {
     if (socket?.connected) {
         socket.emit('join_conversation', { conversationId });
     }
-    // If not connected yet, pendingRooms will be flushed on 'connect' event
 };
 
 export const getSocket = () => socket;

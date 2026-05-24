@@ -11,3 +11,17 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </BrowserRouter>
   </React.StrictMode>,
 )
+
+// ── Service Worker Registration (PWA) ─────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('/sw.js', { scope: '/' })
+      .then((registration) => {
+        console.log('✅ Service Worker registered:', registration.scope)
+      })
+      .catch((err) => {
+        console.warn('Service Worker registration failed:', err)
+      })
+  })
+}
